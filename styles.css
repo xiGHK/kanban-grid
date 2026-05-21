@@ -1,0 +1,167 @@
+.kanban-grid-container {
+  padding: 16px;
+  height: 100%;
+  overflow: auto;
+}
+
+.kanban-grid-toolbar {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.kanban-grid {
+  display: grid;
+  gap: 1px;
+  background: var(--background-modifier-border);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.kanban-grid-header {
+  background: var(--background-secondary);
+  padding: 10px 12px;
+  font-weight: 600;
+  text-align: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 42px;
+  user-select: none;
+}
+
+.kanban-grid-corner {
+  background: var(--background-secondary-alt);
+}
+
+.kanban-grid-row-label {
+  background: var(--background-secondary);
+  padding: 10px 12px;
+  font-weight: 600;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-height: 140px;
+  user-select: none;
+}
+
+.kanban-grid-row-label span,
+.kanban-grid-header span {
+  cursor: default;
+}
+
+.kanban-grid-cell {
+  background: var(--background-primary);
+  padding: 8px;
+  min-height: 140px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  transition: background 0.15s;
+}
+
+.kanban-grid-cell-dragover {
+  background: var(--interactive-accent);
+  opacity: 0.12;
+}
+
+.kanban-grid-card {
+  background: var(--background-secondary);
+  border: 1px solid var(--background-modifier-border);
+  border-radius: 6px;
+  padding: 8px 28px 8px 10px;
+  cursor: grab;
+  position: relative;
+  transition: box-shadow 0.15s, transform 0.1s;
+}
+
+.kanban-grid-card:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+}
+
+.kanban-grid-card:active {
+  cursor: grabbing;
+}
+
+.kanban-grid-card-dragging {
+  opacity: 0.35;
+}
+
+.kanban-grid-card-title {
+  font-weight: 500;
+  font-size: 0.95em;
+}
+
+.kanban-grid-card-desc {
+  font-size: 0.82em;
+  color: var(--text-muted);
+  margin-top: 3px;
+  white-space: pre-wrap;
+}
+
+.kanban-grid-card-delete {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.kanban-grid-card:hover .kanban-grid-card-delete {
+  opacity: 0.7;
+}
+
+.kanban-grid-card-delete:hover {
+  opacity: 1 !important;
+  color: var(--text-error);
+}
+
+.kanban-grid-delete-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 4px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+}
+
+.kanban-grid-header:hover .kanban-grid-delete-btn,
+.kanban-grid-row-label:hover .kanban-grid-delete-btn {
+  opacity: 0.7;
+}
+
+.kanban-grid-delete-btn:hover {
+  opacity: 1 !important;
+  color: var(--text-error);
+}
+
+.kanban-grid-add-card {
+  background: none;
+  border: 1px dashed var(--background-modifier-border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  margin-top: auto;
+  font-size: 18px;
+  line-height: 1;
+  transition: background 0.15s, color 0.15s;
+}
+
+.kanban-grid-add-card:hover {
+  background: var(--background-modifier-hover);
+  color: var(--text-normal);
+}

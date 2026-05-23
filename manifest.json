@@ -4,6 +4,6 @@
   "version": "1.0.0",
   "minAppVersion": "1.0.0",
   "description": "A 2D kanban board with status columns and project rows",
-  "author": "You",
+  "author": "xiGHK",
   "isDesktopOnly": false
 }

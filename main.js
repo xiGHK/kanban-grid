@@ -8,6 +8,19 @@ function generateId() {
   return Date.now().toString(36) + Math.random().toString(36).substr(2, 9);
 }
 
+function defaultBoard() {
+  return {
+    rows: [
+      {
+        id: generateId(),
+        name: 'Project 1',
+        columns: ['To Do', 'In Progress', 'Done'],
+        cards: {},
+      },
+    ],
+  };
+}
+
 // ── Modals ──
 
 class PromptModal extends obsidian.Modal {
@@ -23,12 +36,16 @@ class PromptModal extends obsidian.Modal {
     var self = this;
     contentEl.createEl('h3', { text: this.titleText });
 
-    var placeholder = this.titleText === 'New Column'
-      ? 'e.g. Backlog, Review, Watching...'
-      : this.titleText === 'New Row'
-        ? 'e.g. Project Alpha, Personal...'
-        : 'Enter a name...';
-    var input = contentEl.createEl('input', { type: 'text', placeholder: placeholder });
+    var placeholder =
+      this.titleText === 'New Column'
+        ? 'e.g. Backlog, Review, Watching...'
+        : this.titleText === 'New Row'
+          ? 'e.g. Project Alpha, Personal...'
+          : 'Enter a name...';
+    var input = contentEl.createEl('input', {
+      type: 'text',
+      placeholder: placeholder,
+    });
     input.addClass('kg-modal-input');
     input.value = this.initialValue;
 
@@ -103,62 +120,178 @@ class EditCardModal extends obsidian.Modal {
 
 // ── View ──
 
-class KanbanGridView extends obsidian.ItemView {
+class KanbanGridView extends obsidian.TextFileView {
   constructor(leaf, plugin) {
     super(leaf);
     this.plugin = plugin;
+    this.boardData = null;
     this.dragData = null;
   }
 
   getViewType() {
     return VIEW_TYPE;
   }
+
   getDisplayText() {
-    return 'Kanban Grid';
+    return this.file ? this.file.basename : 'Kanban Grid';
   }
+
   getIcon() {
     return 'layout-grid';
   }
 
+  getViewData() {
+    return this.boardData ? JSON.stringify(this.boardData, null, 2) : '';
+  }
+
+  setViewData(data, clear) {
+    if (data && data.trim()) {
+      try {
+        this.boardData = JSON.parse(data);
+      } catch (e) {
+        this.boardData = defaultBoard();
+      }
+    } else {
+      this.boardData = defaultBoard();
+    }
+    this.render();
+  }
+
+  clear() {
+    this.boardData = null;
+    this.contentEl.empty();
+  }
+
   async onOpen() {
+    await super.onOpen();
     var self = this;
 
     this.addAction('plus-circle', 'Add row', function () {
-      var data = self.plugin.data;
-      new PromptModal(self.app, 'New Row', '', async function (name) {
-        data.rows.push({
+      if (!self.boardData) return;
+      new PromptModal(self.app, 'New Row', '', function (name) {
+        self.boardData.rows.push({
           id: generateId(),
           name: name,
           columns: ['To Do', 'In Progress', 'Done'],
           cards: {},
         });
-        await self.plugin.saveData(data);
+        self.requestSave();
         self.render();
       }).open();
     });
-
-    this.render();
   }
 
-  async onClose() {}
-
   render() {
-    var content = this.containerEl.children[1];
+    var content = this.contentEl;
     content.empty();
     content.addClass('kg');
 
-    var data = this.plugin.data;
+    if (!this.boardData) return;
+
+    var data = this.boardData;
     var self = this;
 
-    // ── Board ──
     var board = content.createDiv('kg-board');
 
-    data.rows.forEach(function (rowData) {
+    // ── Board-level row drag handling ──
+    var rowIndicator = document.createElement('div');
+    rowIndicator.className = 'kg-row-drop-indicator';
+    var lastRowIndicatorY = -1;
+
+    board.addEventListener('dragover', function (e) {
+      if (!self.dragRowId) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+
+      var y = Math.round(e.clientY / 8) * 8;
+      if (y === lastRowIndicatorY) return;
+      lastRowIndicatorY = y;
+
+      if (rowIndicator.parentNode) rowIndicator.remove();
+
+      var rowEls = Array.from(board.querySelectorAll('.kg-row'));
+      var inserted = false;
+      for (var i = 0; i < rowEls.length; i++) {
+        var rect = rowEls[i].getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) {
+          board.insertBefore(rowIndicator, rowEls[i]);
+          inserted = true;
+          break;
+        }
+      }
+      if (!inserted) board.appendChild(rowIndicator);
+    });
+
+    board.addEventListener('dragleave', function (e) {
+      if (!self.dragRowId) return;
+      if (!e.relatedTarget || !board.contains(e.relatedTarget)) {
+        if (rowIndicator.parentNode) rowIndicator.remove();
+        lastRowIndicatorY = -1;
+      }
+    });
+
+    board.addEventListener('drop', function (e) {
+      if (!self.dragRowId) return;
+      e.preventDefault();
+
+      if (rowIndicator.parentNode) rowIndicator.remove();
+      lastRowIndicatorY = -1;
+
+      var fromIdx = data.rows.findIndex(function (r) {
+        return r.id === self.dragRowId;
+      });
+      if (fromIdx === -1) return;
+
+      var rowEls = Array.from(board.querySelectorAll('.kg-row'));
+      var insertIdx = rowEls.length;
+      for (var i = 0; i < rowEls.length; i++) {
+        var rect = rowEls[i].getBoundingClientRect();
+        if (e.clientY < rect.top + rect.height / 2) {
+          insertIdx = i;
+          break;
+        }
+      }
+      if (insertIdx > fromIdx) insertIdx--;
+      if (insertIdx === fromIdx) { self.dragRowId = null; return; }
+
+      var moved = data.rows.splice(fromIdx, 1)[0];
+      data.rows.splice(insertIdx, 0, moved);
+
+      self.dragRowId = null;
+      self.requestSave();
+      self.render();
+    });
+
+    data.rows.forEach(function (rowData, rowIdx) {
       var rowEl = board.createDiv('kg-row');
+      rowEl.dataset.rowId = rowData.id;
 
       // ── Row Header ──
       var rowHeader = rowEl.createDiv('kg-row-header');
-      var rowTitleSpan = rowHeader.createSpan({ text: rowData.name, cls: 'kg-row-title' });
+
+      var rowGrip = rowHeader.createEl('a', {
+        cls: 'kg-row-grip clickable-icon',
+      });
+      obsidian.setIcon(rowGrip, 'grip-vertical');
+      rowGrip.draggable = true;
+
+      rowGrip.addEventListener('dragstart', function (e) {
+        self.dragRowId = rowData.id;
+        rowEl.addClass('is-row-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.setData('text/plain', '');
+      });
+      rowGrip.addEventListener('dragend', function () {
+        rowEl.removeClass('is-row-dragging');
+        self.dragRowId = null;
+        if (rowIndicator.parentNode) rowIndicator.remove();
+        lastRowIndicatorY = -1;
+      });
+
+      var rowTitleSpan = rowHeader.createSpan({
+        text: rowData.name,
+        cls: 'kg-row-title',
+      });
 
       rowTitleSpan.addEventListener('click', function () {
         var input = document.createElement('input');
@@ -171,13 +304,13 @@ class KanbanGridView extends obsidian.ItemView {
         input.select();
 
         var saved = false;
-        var doSave = async function () {
+        var doSave = function () {
           if (saved) return;
           saved = true;
           var newName = input.value.trim();
           if (newName && newName !== rowData.name) {
             rowData.name = newName;
-            await self.plugin.saveData(data);
+            self.requestSave();
           }
           self.render();
         };
@@ -209,10 +342,10 @@ class KanbanGridView extends obsidian.ItemView {
                 self.app,
                 'New Column',
                 '',
-                async function (name) {
+                function (name) {
                   if (!rowData.columns.includes(name)) {
                     rowData.columns.push(name);
-                    await self.plugin.saveData(data);
+                    self.requestSave();
                     self.render();
                   } else {
                     new obsidian.Notice(
@@ -228,11 +361,11 @@ class KanbanGridView extends obsidian.ItemView {
           item
             .setTitle('Delete row')
             .setIcon('lucide-trash-2')
-            .onClick(async function () {
+            .onClick(function () {
               data.rows = data.rows.filter(function (r) {
                 return r.id !== rowData.id;
               });
-              await self.plugin.saveData(data);
+              self.requestSave();
               self.render();
             });
         });
@@ -250,7 +383,46 @@ class KanbanGridView extends obsidian.ItemView {
 
         // ── Lane Header ──
         var laneHeader = lane.createDiv('kg-lane-header');
-        laneHeader.createDiv({ text: col, cls: 'kg-lane-title' });
+        var laneTitleDiv = laneHeader.createDiv({ text: col, cls: 'kg-lane-title' });
+
+        laneTitleDiv.addEventListener('click', function () {
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.value = col;
+          input.className = 'kg-lane-title-input';
+
+          laneTitleDiv.replaceWith(input);
+          input.focus();
+          input.select();
+
+          var saved = false;
+          var doSave = function () {
+            if (saved) return;
+            saved = true;
+            var newName = input.value.trim();
+            if (newName && newName !== col && !rowData.columns.includes(newName)) {
+              var idx = rowData.columns.indexOf(col);
+              rowData.columns[idx] = newName;
+              if (rowData.cards[col]) {
+                rowData.cards[newName] = rowData.cards[col];
+                delete rowData.cards[col];
+              }
+              self.requestSave();
+            }
+            self.render();
+          };
+          var doCancel = function () {
+            if (saved) return;
+            saved = true;
+            self.render();
+          };
+
+          input.addEventListener('keydown', function (e) {
+            if (e.key === 'Enter') doSave();
+            if (e.key === 'Escape') doCancel();
+          });
+          input.addEventListener('blur', doSave);
+        });
         laneHeader.createDiv({
           text: String(cards.length),
           cls: 'kg-lane-count',
@@ -272,7 +444,7 @@ class KanbanGridView extends obsidian.ItemView {
                   self.app,
                   'Rename Column',
                   col,
-                  async function (newName) {
+                  function (newName) {
                     if (newName === col) return;
                     if (rowData.columns.includes(newName)) {
                       new obsidian.Notice(
@@ -286,7 +458,7 @@ class KanbanGridView extends obsidian.ItemView {
                       rowData.cards[newName] = rowData.cards[col];
                       delete rowData.cards[col];
                     }
-                    await self.plugin.saveData(data);
+                    self.requestSave();
                     self.render();
                   }
                 ).open();
@@ -297,12 +469,12 @@ class KanbanGridView extends obsidian.ItemView {
             item
               .setTitle('Delete column')
               .setIcon('lucide-trash-2')
-              .onClick(async function () {
+              .onClick(function () {
                 rowData.columns = rowData.columns.filter(function (c) {
                   return c !== col;
                 });
                 delete rowData.cards[col];
-                await self.plugin.saveData(data);
+                self.requestSave();
                 self.render();
               });
           });
@@ -313,28 +485,54 @@ class KanbanGridView extends obsidian.ItemView {
         var laneItems = lane.createDiv('kg-lane-items');
 
         lane.addEventListener('dragover', function (e) {
+          if (self.dragRowId) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           lane.addClass('is-drop-target');
-        });
-        lane.addEventListener('dragleave', function (e) {
-          if (!e.relatedTarget || !lane.contains(e.relatedTarget)) {
-            lane.removeClass('is-drop-target');
+
+          var old = laneItems.querySelector('.kg-drop-indicator');
+          if (old) old.remove();
+
+          if (!self.dragData) return;
+
+          var indicator = document.createElement('div');
+          indicator.className = 'kg-drop-indicator';
+
+          var cardEls = Array.from(
+            laneItems.querySelectorAll('.kg-item')
+          );
+          var inserted = false;
+          for (var i = 0; i < cardEls.length; i++) {
+            var rect = cardEls[i].getBoundingClientRect();
+            if (e.clientY < rect.top + rect.height / 2) {
+              laneItems.insertBefore(indicator, cardEls[i]);
+              inserted = true;
+              break;
+            }
+          }
+          if (!inserted) {
+            laneItems.appendChild(indicator);
           }
         });
-        lane.addEventListener('drop', async function (e) {
+        lane.addEventListener('dragleave', function (e) {
+          if (self.dragRowId) return;
+          if (!e.relatedTarget || !lane.contains(e.relatedTarget)) {
+            lane.removeClass('is-drop-target');
+            var ind = laneItems.querySelector('.kg-drop-indicator');
+            if (ind) ind.remove();
+          }
+        });
+        lane.addEventListener('drop', function (e) {
+          if (self.dragRowId) return;
           e.preventDefault();
           lane.removeClass('is-drop-target');
+          var ind = laneItems.querySelector('.kg-drop-indicator');
+          if (ind) ind.remove();
           if (!self.dragData) return;
 
           var srcRowId = self.dragData.fromRowId;
           var srcCol = self.dragData.fromCol;
           var cardId = self.dragData.cardId;
-
-          if (srcRowId === rowData.id && srcCol === col) {
-            self.dragData = null;
-            return;
-          }
 
           var srcRow = data.rows.find(function (r) {
             return r.id === srcRowId;
@@ -347,27 +545,97 @@ class KanbanGridView extends obsidian.ItemView {
           });
           if (cardIndex === -1) return;
 
-          var movedCard = srcCards.splice(cardIndex, 1)[0];
-          srcRow.cards[srcCol] = srcCards;
+          var cardEls = Array.from(
+            laneItems.querySelectorAll('.kg-item')
+          );
+          var insertIndex = cardEls.length;
+          for (var i = 0; i < cardEls.length; i++) {
+            var rect = cardEls[i].getBoundingClientRect();
+            if (e.clientY < rect.top + rect.height / 2) {
+              insertIndex = i;
+              break;
+            }
+          }
 
-          if (!rowData.cards[col]) rowData.cards[col] = [];
-          rowData.cards[col].push(movedCard);
+          var movedCard = srcCards.splice(cardIndex, 1)[0];
+
+          if (srcRowId === rowData.id && srcCol === col) {
+            if (insertIndex > cardIndex) insertIndex--;
+            srcCards.splice(insertIndex, 0, movedCard);
+            rowData.cards[col] = srcCards;
+          } else {
+            srcRow.cards[srcCol] = srcCards;
+            if (!rowData.cards[col]) rowData.cards[col] = [];
+            rowData.cards[col].splice(insertIndex, 0, movedCard);
+          }
 
           self.dragData = null;
-          await self.plugin.saveData(data);
+          self.requestSave();
           self.render();
         });
 
         // Render cards
-        cards.forEach(function (card) {
+        cards.forEach(function (card, cardIdx) {
           var itemEl = laneItems.createDiv('kg-item');
           itemEl.draggable = true;
 
           var itemContent = itemEl.createDiv('kg-item-content');
           var itemTitleWrap = itemContent.createDiv('kg-item-title-wrapper');
-          itemTitleWrap.createDiv({
+          itemTitleWrap.createSpan({
+            text: String(cardIdx + 1),
+            cls: 'kg-item-number',
+          });
+          var itemTitleDiv = itemTitleWrap.createDiv({
             text: card.title,
             cls: 'kg-item-title',
+          });
+
+          itemTitleDiv.addEventListener('click', function (e) {
+            e.stopPropagation();
+            var textarea = document.createElement('textarea');
+            textarea.value = card.title;
+            textarea.className = 'kg-item-title-input';
+            textarea.rows = 1;
+            textarea.style.height = itemTitleDiv.offsetHeight + 'px';
+
+            itemTitleDiv.replaceWith(textarea);
+            itemEl.draggable = false;
+            textarea.focus();
+            textarea.setSelectionRange(
+              textarea.value.length,
+              textarea.value.length
+            );
+            textarea.style.height = textarea.scrollHeight + 'px';
+
+            var saved = false;
+            var doSave = function () {
+              if (saved) return;
+              saved = true;
+              var newTitle = textarea.value.trim();
+              if (newTitle && newTitle !== card.title) {
+                card.title = newTitle;
+                self.requestSave();
+              }
+              self.render();
+            };
+            var doCancel = function () {
+              if (saved) return;
+              saved = true;
+              self.render();
+            };
+
+            textarea.addEventListener('keydown', function (ev) {
+              if (ev.key === 'Enter' && !ev.shiftKey) {
+                ev.preventDefault();
+                doSave();
+              }
+              if (ev.key === 'Escape') doCancel();
+            });
+            textarea.addEventListener('input', function () {
+              textarea.style.height = 'auto';
+              textarea.style.height = textarea.scrollHeight + 'px';
+            });
+            textarea.addEventListener('blur', doSave);
           });
 
           var itemMenuBtn = itemTitleWrap.createEl('a', {
@@ -401,9 +669,9 @@ class KanbanGridView extends obsidian.ItemView {
                   new EditCardModal(
                     self.app,
                     card.title,
-                    async function (newTitle) {
+                    function (newTitle) {
                       card.title = newTitle;
-                      await self.plugin.saveData(data);
+                      self.requestSave();
                       self.render();
                     }
                   ).open();
@@ -414,13 +682,13 @@ class KanbanGridView extends obsidian.ItemView {
               item
                 .setTitle('Delete')
                 .setIcon('lucide-trash-2')
-                .onClick(async function () {
+                .onClick(function () {
                   var idx = cards.findIndex(function (c) {
                     return c.id === card.id;
                   });
                   if (idx > -1) cards.splice(idx, 1);
                   rowData.cards[col] = cards;
-                  await self.plugin.saveData(data);
+                  self.requestSave();
                   self.render();
                 });
             });
@@ -454,12 +722,12 @@ class KanbanGridView extends obsidian.ItemView {
           saveBtn.addClass('mod-cta');
           var cancelBtn = btnRow.createEl('button', { text: 'Cancel' });
 
-          var doSave = async function () {
+          var doSave = function () {
             var title = textarea.value.trim();
             if (title) {
               if (!rowData.cards[col]) rowData.cards[col] = [];
               rowData.cards[col].push({ id: generateId(), title: title });
-              await self.plugin.saveData(data);
+              self.requestSave();
               self.render();
             } else {
               doCancel();
@@ -486,7 +754,6 @@ class KanbanGridView extends obsidian.ItemView {
           }, 10);
         });
       });
-
     });
   }
 }
@@ -495,74 +762,44 @@ class KanbanGridView extends obsidian.ItemView {
 
 class KanbanGridPlugin extends obsidian.Plugin {
   async onload() {
-    await this.loadPluginData();
-
     var self = this;
+
     this.registerView(VIEW_TYPE, function (leaf) {
       return new KanbanGridView(leaf, self);
     });
 
-    this.addRibbonIcon('layout-grid', 'Open Kanban Grid', function () {
-      self.activateView();
+    this.registerExtensions(['grid'], VIEW_TYPE);
+
+    this.addRibbonIcon('layout-grid', 'New Kanban Grid board', function () {
+      self.createNewBoard();
     });
 
     this.addCommand({
-      id: 'open-kanban-grid',
-      name: 'Open Kanban Grid',
+      id: 'create-kanban-grid',
+      name: 'Create new Kanban Grid board',
       callback: function () {
-        self.activateView();
+        self.createNewBoard();
       },
     });
   }
 
-  async activateView() {
-    var workspace = this.app.workspace;
-    var leaves = workspace.getLeavesOfType(VIEW_TYPE);
-    if (leaves.length > 0) {
-      workspace.revealLeaf(leaves[0]);
-    } else {
-      var leaf = workspace.getLeaf('tab');
-      await leaf.setViewState({ type: VIEW_TYPE, active: true });
-      workspace.revealLeaf(leaf);
-    }
-  }
+  async createNewBoard() {
+    var data = defaultBoard();
+    var baseName = 'Kanban Grid';
+    var fileName = baseName + '.grid';
+    var counter = 1;
 
-  async loadPluginData() {
-    var saved = await this.loadData();
-
-    if (!saved) {
-      this.data = {
-        rows: [
-          {
-            id: generateId(),
-            name: 'Project 1',
-            columns: ['To Do', 'In Progress', 'Done'],
-            cards: {},
-          },
-        ],
-      };
-      return;
+    while (this.app.vault.getAbstractFileByPath(fileName)) {
+      fileName = baseName + ' ' + counter + '.grid';
+      counter++;
     }
 
-    // Migrate old format (global columns) to new format (per-row columns)
-    if (saved.columns && Array.isArray(saved.columns)) {
-      var oldRows = saved.rows || ['Project 1'];
-      var oldCards = saved.cards || {};
-      this.data = {
-        rows: oldRows.map(function (name) {
-          return {
-            id: generateId(),
-            name: name,
-            columns: saved.columns.slice(),
-            cards: oldCards[name] || {},
-          };
-        }),
-      };
-      await this.saveData(this.data);
-      return;
-    }
-
-    this.data = saved;
+    var file = await this.app.vault.create(
+      fileName,
+      JSON.stringify(data, null, 2)
+    );
+    var leaf = this.app.workspace.getLeaf('tab');
+    await leaf.openFile(file);
   }
 
   async onunload() {}

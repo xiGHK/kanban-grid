@@ -183,6 +183,23 @@ class KanbanGridView extends obsidian.TextFileView {
 
   render() {
     var content = this.contentEl;
+
+    var prevBoard = content.querySelector('.kg-board');
+    var prevScrollTop = prevBoard ? prevBoard.scrollTop : 0;
+    var laneScrolls = {};
+    content.querySelectorAll('.kg-row').forEach(function (rowEl) {
+      var lanes = rowEl.querySelector('.kg-lanes');
+      if (lanes && lanes.scrollLeft && rowEl.dataset.rowId) {
+        laneScrolls[rowEl.dataset.rowId] = lanes.scrollLeft;
+      }
+    });
+    var laneItemScrolls = {};
+    content.querySelectorAll('.kg-lane-items').forEach(function (el) {
+      if (el.scrollTop && el.dataset.laneKey) {
+        laneItemScrolls[el.dataset.laneKey] = el.scrollTop;
+      }
+    });
+
     content.empty();
     content.addClass('kg');
 
@@ -483,6 +500,8 @@ class KanbanGridView extends obsidian.TextFileView {
 
         // ── Lane Items (drop zone) ──
         var laneItems = lane.createDiv('kg-lane-items');
+        var laneKey = rowData.id + '::' + col;
+        laneItems.dataset.laneKey = laneKey;
 
         lane.addEventListener('dragover', function (e) {
           if (self.dragRowId) return;
@@ -727,6 +746,7 @@ class KanbanGridView extends obsidian.TextFileView {
             if (title) {
               if (!rowData.cards[col]) rowData.cards[col] = [];
               rowData.cards[col].push({ id: generateId(), title: title });
+              self.pendingLaneScroll = laneKey;
               self.requestSave();
               self.render();
             } else {
@@ -753,8 +773,21 @@ class KanbanGridView extends obsidian.TextFileView {
             textarea.focus();
           }, 10);
         });
+
+        if (self.pendingLaneScroll === laneKey) {
+          self.pendingLaneScroll = null;
+          laneItems.scrollTop = laneItems.scrollHeight;
+        } else if (laneItemScrolls[laneKey]) {
+          laneItems.scrollTop = laneItemScrolls[laneKey];
+        }
       });
+
+      if (laneScrolls[rowData.id]) {
+        lanesEl.scrollLeft = laneScrolls[rowData.id];
+      }
     });
+
+    board.scrollTop = prevScrollTop;
   }
 }
 

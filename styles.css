@@ -106,6 +106,7 @@
 
 .kg-lane {
   width: 100%;
+  max-height: 40vh;
   display: flex;
   flex-direction: column;
   background-color: var(--viewer-secondary, var(--background-secondary));
@@ -180,10 +181,12 @@
   flex-direction: column;
   min-height: 20px;
   flex-grow: 1;
+  overflow-y: auto;
 }
 
 .kg-lane-items > * {
   margin-top: 4px;
+  flex-shrink: 0;
 }
 
 .kg-placeholder {

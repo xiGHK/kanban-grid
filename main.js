@@ -126,6 +126,7 @@ class KanbanGridView extends obsidian.TextFileView {
     this.plugin = plugin;
     this.boardData = null;
     this.dragData = null;
+    this.dragColData = null;
   }
 
   getViewType() {
@@ -392,6 +393,75 @@ class KanbanGridView extends obsidian.TextFileView {
       // ── Lanes ──
       var lanesEl = rowEl.createDiv('kg-lanes');
 
+      // ── Column (lane) drag handling, scoped to this row ──
+      var colIndicator = document.createElement('div');
+      colIndicator.className = 'kg-col-drop-indicator';
+      var lastColIndicatorX = -1;
+
+      lanesEl.addEventListener('dragover', function (e) {
+        if (!self.dragColData) return;
+        if (self.dragColData.fromRowId !== rowData.id) return;
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+
+        var x = Math.round(e.clientX / 8) * 8;
+        if (x === lastColIndicatorX) return;
+        lastColIndicatorX = x;
+
+        if (colIndicator.parentNode) colIndicator.remove();
+
+        var laneEls = Array.from(lanesEl.querySelectorAll('.kg-lane-wrapper'));
+        var inserted = false;
+        for (var i = 0; i < laneEls.length; i++) {
+          var rect = laneEls[i].getBoundingClientRect();
+          if (e.clientX < rect.left + rect.width / 2) {
+            lanesEl.insertBefore(colIndicator, laneEls[i]);
+            inserted = true;
+            break;
+          }
+        }
+        if (!inserted) lanesEl.appendChild(colIndicator);
+      });
+
+      lanesEl.addEventListener('dragleave', function (e) {
+        if (!self.dragColData) return;
+        if (!e.relatedTarget || !lanesEl.contains(e.relatedTarget)) {
+          if (colIndicator.parentNode) colIndicator.remove();
+          lastColIndicatorX = -1;
+        }
+      });
+
+      lanesEl.addEventListener('drop', function (e) {
+        if (!self.dragColData) return;
+        if (self.dragColData.fromRowId !== rowData.id) return;
+        e.preventDefault();
+
+        if (colIndicator.parentNode) colIndicator.remove();
+        lastColIndicatorX = -1;
+
+        var fromIdx = rowData.columns.indexOf(self.dragColData.col);
+        if (fromIdx === -1) { self.dragColData = null; return; }
+
+        var laneEls = Array.from(lanesEl.querySelectorAll('.kg-lane-wrapper'));
+        var insertIdx = laneEls.length;
+        for (var i = 0; i < laneEls.length; i++) {
+          var rect = laneEls[i].getBoundingClientRect();
+          if (e.clientX < rect.left + rect.width / 2) {
+            insertIdx = i;
+            break;
+          }
+        }
+        if (insertIdx > fromIdx) insertIdx--;
+        if (insertIdx === fromIdx) { self.dragColData = null; return; }
+
+        var movedCol = rowData.columns.splice(fromIdx, 1)[0];
+        rowData.columns.splice(insertIdx, 0, movedCol);
+
+        self.dragColData = null;
+        self.requestSave();
+        self.render();
+      });
+
       rowData.columns.forEach(function (col) {
         var cards = rowData.cards[col] || [];
 
@@ -400,9 +470,35 @@ class KanbanGridView extends obsidian.TextFileView {
 
         // ── Lane Header ──
         var laneHeader = lane.createDiv('kg-lane-header');
+        laneHeader.draggable = true;
+
+        laneHeader.addEventListener('dragstart', function (e) {
+          e.dataTransfer.effectAllowed = 'move';
+          e.dataTransfer.setData('text/plain', '');
+          try {
+            var rect = lane.getBoundingClientRect();
+            e.dataTransfer.setDragImage(
+              lane,
+              e.clientX - rect.left,
+              e.clientY - rect.top
+            );
+          } catch (err) {}
+          self.dragColData = { fromRowId: rowData.id, col: col };
+          setTimeout(function () {
+            laneWrapper.addClass('is-col-dragging');
+          }, 0);
+        });
+        laneHeader.addEventListener('dragend', function () {
+          laneWrapper.removeClass('is-col-dragging');
+          self.dragColData = null;
+          if (colIndicator.parentNode) colIndicator.remove();
+          lastColIndicatorX = -1;
+        });
+
         var laneTitleDiv = laneHeader.createDiv({ text: col, cls: 'kg-lane-title' });
 
         laneTitleDiv.addEventListener('click', function () {
+          laneHeader.draggable = false;
           var input = document.createElement('input');
           input.type = 'text';
           input.value = col;
@@ -504,7 +600,7 @@ class KanbanGridView extends obsidian.TextFileView {
         laneItems.dataset.laneKey = laneKey;
 
         lane.addEventListener('dragover', function (e) {
-          if (self.dragRowId) return;
+          if (self.dragRowId || self.dragColData) return;
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           lane.addClass('is-drop-target');
@@ -534,7 +630,7 @@ class KanbanGridView extends obsidian.TextFileView {
           }
         });
         lane.addEventListener('dragleave', function (e) {
-          if (self.dragRowId) return;
+          if (self.dragRowId || self.dragColData) return;
           if (!e.relatedTarget || !lane.contains(e.relatedTarget)) {
             lane.removeClass('is-drop-target');
             var ind = laneItems.querySelector('.kg-drop-indicator');
@@ -542,7 +638,7 @@ class KanbanGridView extends obsidian.TextFileView {
           }
         });
         lane.addEventListener('drop', function (e) {
-          if (self.dragRowId) return;
+          if (self.dragRowId || self.dragColData) return;
           e.preventDefault();
           lane.removeClass('is-drop-target');
           var ind = laneItems.querySelector('.kg-drop-indicator');

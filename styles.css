@@ -131,6 +131,15 @@
   flex-shrink: 0;
   border-bottom: 1px solid var(--viewer-primary, var(--background-modifier-border));
   color: var(--viewer-text-muted, var(--text-muted));
+  cursor: grab;
+}
+
+.kg-lane-header:active {
+  cursor: grabbing;
+}
+
+.kg-lane-wrapper.is-col-dragging {
+  opacity: 0.35;
 }
 
 .kg-lane-title {
@@ -395,6 +404,14 @@ button.kg-add-card-btn:hover {
   background-color: var(--interactive-accent);
   border-radius: 2px;
   margin: 2px 0;
+  flex-shrink: 0;
+}
+
+.kg-col-drop-indicator {
+  align-self: stretch;
+  width: 3px;
+  background-color: var(--interactive-accent);
+  border-radius: 2px;
   flex-shrink: 0;
 }
 

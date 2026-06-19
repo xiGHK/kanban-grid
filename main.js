@@ -187,13 +187,7 @@ class KanbanGridView extends obsidian.TextFileView {
 
     var prevBoard = content.querySelector('.kg-board');
     var prevScrollTop = prevBoard ? prevBoard.scrollTop : 0;
-    var laneScrolls = {};
-    content.querySelectorAll('.kg-row').forEach(function (rowEl) {
-      var lanes = rowEl.querySelector('.kg-lanes');
-      if (lanes && lanes.scrollLeft && rowEl.dataset.rowId) {
-        laneScrolls[rowEl.dataset.rowId] = lanes.scrollLeft;
-      }
-    });
+    var prevScrollLeft = prevBoard ? prevBoard.scrollLeft : 0;
     var laneItemScrolls = {};
     content.querySelectorAll('.kg-lane-items').forEach(function (el) {
       if (el.scrollTop && el.dataset.laneKey) {
@@ -210,6 +204,105 @@ class KanbanGridView extends obsidian.TextFileView {
     var self = this;
 
     var board = content.createDiv('kg-board');
+
+    // ── Drag-to-pan: grab empty space and move the board in any direction ──
+    var panPointerId = null;
+    var panStartX = 0, panStartY = 0, panStartLeft = 0, panStartTop = 0;
+    var panning = false;
+
+    board.addEventListener('pointerdown', function (e) {
+      if (e.button !== 0) return;
+      // leave cards, drag handles, and controls to their own handlers
+      if (e.target.closest('.kg-item, .kg-lane-header, button, a, input, textarea')) {
+        return;
+      }
+      panPointerId = e.pointerId;
+      panStartX = e.clientX;
+      panStartY = e.clientY;
+      panStartLeft = board.scrollLeft;
+      panStartTop = board.scrollTop;
+      panning = false;
+    });
+
+    board.addEventListener('pointermove', function (e) {
+      if (panPointerId === null || e.pointerId !== panPointerId) return;
+      var dx = e.clientX - panStartX;
+      var dy = e.clientY - panStartY;
+      if (!panning) {
+        if (Math.abs(dx) < 4 && Math.abs(dy) < 4) return;
+        panning = true;
+        board.addClass('is-panning');
+        try { board.setPointerCapture(panPointerId); } catch (err) {}
+      }
+      e.preventDefault();
+      board.scrollLeft = panStartLeft - dx;
+      board.scrollTop = panStartTop - dy;
+    });
+
+    var endPan = function (e) {
+      if (panPointerId === null) return;
+      if (panning) {
+        board.removeClass('is-panning');
+        try { board.releasePointerCapture(e.pointerId); } catch (err) {}
+      }
+      panPointerId = null;
+      panning = false;
+    };
+    board.addEventListener('pointerup', endPan);
+    board.addEventListener('pointercancel', endPan);
+
+    // ── Edge auto-pan: scroll the board when a drag nears its edges ──
+    var EDGE = 60;
+    var MAX_SPEED = 16;
+    var autoVX = 0, autoVY = 0, autoRAF = null;
+
+    var autoStep = function () {
+      if (!board.isConnected || (autoVX === 0 && autoVY === 0)) {
+        autoRAF = null;
+        return;
+      }
+      board.scrollLeft += autoVX;
+      board.scrollTop += autoVY;
+      autoRAF = requestAnimationFrame(autoStep);
+    };
+
+    var stopAutoPan = function () {
+      autoVX = 0;
+      autoVY = 0;
+      if (autoRAF !== null) {
+        cancelAnimationFrame(autoRAF);
+        autoRAF = null;
+      }
+    };
+
+    board.addEventListener('dragover', function (e) {
+      if (!self.dragData && !self.dragColData && !self.dragRowId) return;
+      var rect = board.getBoundingClientRect();
+      var vx = 0, vy = 0;
+      if (e.clientX < rect.left + EDGE) {
+        vx = -MAX_SPEED * (Math.min(EDGE, rect.left + EDGE - e.clientX) / EDGE);
+      } else if (e.clientX > rect.right - EDGE) {
+        vx = MAX_SPEED * (Math.min(EDGE, e.clientX - (rect.right - EDGE)) / EDGE);
+      }
+      if (e.clientY < rect.top + EDGE) {
+        vy = -MAX_SPEED * (Math.min(EDGE, rect.top + EDGE - e.clientY) / EDGE);
+      } else if (e.clientY > rect.bottom - EDGE) {
+        vy = MAX_SPEED * (Math.min(EDGE, e.clientY - (rect.bottom - EDGE)) / EDGE);
+      }
+      autoVX = vx;
+      autoVY = vy;
+      if ((vx !== 0 || vy !== 0) && autoRAF === null) {
+        autoRAF = requestAnimationFrame(autoStep);
+      }
+    });
+
+    board.addEventListener('drop', stopAutoPan);
+    board.addEventListener('dragend', stopAutoPan);
+    board.addEventListener('dragleave', function (e) {
+      if (!e.relatedTarget || !board.contains(e.relatedTarget)) {
+        stopAutoPan();
+      }
+    });
 
     // ── Board-level row drag handling ──
     var rowIndicator = document.createElement('div');
@@ -878,12 +971,10 @@ class KanbanGridView extends obsidian.TextFileView {
         }
       });
 
-      if (laneScrolls[rowData.id]) {
-        lanesEl.scrollLeft = laneScrolls[rowData.id];
-      }
     });
 
     board.scrollTop = prevScrollTop;
+    board.scrollLeft = prevScrollLeft;
   }
 }
 

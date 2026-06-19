@@ -17,14 +17,21 @@
 
 .kg-board {
   flex-grow: 1;
-  overflow-y: auto;
+  overflow: auto;
   padding: 16px;
+  cursor: grab;
+}
+
+.kg-board.is-panning {
+  cursor: grabbing;
+  user-select: none;
 }
 
 /* ── Row (swimlane) ── */
 
 .kg-row {
   margin-bottom: 24px;
+  width: max-content;
 }
 
 .kg-row:last-child {
@@ -36,6 +43,10 @@
   align-items: center;
   padding: 4px 8px 8px;
   gap: 8px;
+  position: sticky;
+  left: 0;
+  width: max-content;
+  min-width: 240px;
 }
 
 .kg-row-title {
@@ -92,7 +103,7 @@
   display: flex;
   align-items: flex-start;
   gap: 10px;
-  overflow-x: auto;
+  width: max-content;
   padding-bottom: 4px;
 }
 
